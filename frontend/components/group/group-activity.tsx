@@ -5,6 +5,8 @@ import { Badge } from "@/components/ui/badge"
 import { ArrowUpRight, ArrowDownLeft, UserPlus, Settings, Loader2, ExternalLink, RefreshCw } from "lucide-react"
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
+import { formatRelativeTime, formatExactDateTime } from "@/lib/utils"
 
 interface Activity {
   id: string
@@ -71,43 +73,7 @@ export function GroupActivity({ groupId }: { groupId: string }) {
     return `${address.slice(0, 6)}...${address.slice(-4)}`
   }
 
-  const formatTime = (dateString: string) => {
-    try {
-      const date = new Date(dateString)
-      
-      // Check if date is valid
-      if (isNaN(date.getTime())) {
-        return "Invalid date"
-      }
-      
-      const now = new Date()
-      const diffMs = now.getTime() - date.getTime()
-      
-      // Handle negative differences (future dates)
-      if (diffMs < 0) {
-        return "Just now"
-      }
-      
-      const diffMins = Math.floor(diffMs / 60000)
-      const diffHours = Math.floor(diffMins / 60)
-      const diffDays = Math.floor(diffHours / 24)
 
-      if (diffMins < 1) return "Just now"
-      if (diffMins < 60) return `${diffMins}m ago`
-      if (diffHours < 24) return `${diffHours}h ago`
-      if (diffDays < 7) return `${diffDays}d ago`
-      
-      return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-    } catch (err) {
-      return "Unknown date"
-    }
-  }
 
   const getBlockExplorerUrl = (txHash: string | null) => {
     if (!txHash) return null
@@ -170,7 +136,19 @@ export function GroupActivity({ groupId }: { groupId: string }) {
                   {activity.amount && <Badge variant="secondary">{activity.amount.toFixed(2)} XLM</Badge>}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {formatAddress(activity.user_address)} • {formatTime(activity.created_at)}
+                  {formatAddress(activity.user_address)} •{" "}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <time
+                        dateTime={activity.created_at}
+                        className="cursor-default"
+                        tabIndex={0}
+                      >
+                        {formatRelativeTime(activity.created_at)}
+                      </time>
+                    </TooltipTrigger>
+                    <TooltipContent>{formatExactDateTime(activity.created_at)}</TooltipContent>
+                  </Tooltip>
                 </p>
                 {activity.description && (
                   <p className="text-xs text-muted-foreground mt-1">{activity.description}</p>
