@@ -215,6 +215,27 @@ export async function PATCH(req: NextRequest) {
         description: `${activity_type} transaction`,
       }])
       if (actErr) console.error('Activity log error:', actErr)
+
+      // Synchronize database pool_members table with on-chain membership changes
+      if (activity_type === 'member_added' && body.memberAddress) {
+        const { error: addErr } = await supabase
+          .from('pool_members')
+          .insert([{
+            pool_id: poolId,
+            member_address: body.memberAddress.toLowerCase(),
+            contribution_amount: 0,
+            status: 'pending',
+          }])
+        if (addErr) console.error('Failed to add member in DB:', addErr)
+      } else if (activity_type === 'member_removed' && body.memberAddress) {
+        const { error: remErr } = await supabase
+          .from('pool_members')
+          .delete()
+          .eq('pool_id', poolId)
+          .eq('member_address', body.memberAddress.toLowerCase())
+        if (remErr) console.error('Failed to remove member in DB:', remErr)
+      }
+
       return NextResponse.json({ success: true })
     }
 

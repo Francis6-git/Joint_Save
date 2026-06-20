@@ -108,6 +108,7 @@ export function FlexibleForm() {
       const withdrawalFeeBps = Math.round(parseFloat(formData.withdrawalFee) * 100)
       await initFlexible(contractId, {
         token: TOKEN === "native" ? "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC" : TOKEN,
+        admin: address,
         members: validMembers,
         minimumDeposit: formData.minimumDeposit,
         withdrawalFeeBps,

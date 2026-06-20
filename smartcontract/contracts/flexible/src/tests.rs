@@ -6,7 +6,14 @@ use soroban_sdk::{testutils::Address as _, token, Address, Env, Vec};
 fn setup_pool(
     env: &Env,
     yield_enabled: bool,
-) -> (FlexiblePoolClient<'static>, Address, Address, Address, Address, Address) {
+) -> (
+    FlexiblePoolClient<'static>,
+    Address,
+    Address,
+    Address,
+    Address,
+    Address,
+) {
     let contract_id = env.register_contract(None, FlexiblePool);
     let client = FlexiblePoolClient::new(env, &contract_id);
 
@@ -23,7 +30,16 @@ fn setup_pool(
     members.push_back(member_a.clone());
     members.push_back(member_b.clone());
 
-    client.initialize(&token_address, &admin, &members, &10i128, &0u32, &yield_enabled, &treasury, &0u32);
+    client.initialize(
+        &token_address,
+        &admin,
+        &members,
+        &10i128,
+        &0u32,
+        &yield_enabled,
+        &treasury,
+        &0u32,
+    );
 
     (client, token_address, admin, treasury, member_a, member_b)
 }
@@ -64,7 +80,16 @@ fn test_withdrawal_fee_deduction() {
     members.push_back(member_a.clone());
     members.push_back(member_b.clone());
 
-    client.initialize(&token_address, &admin, &members, &10i128, &200u32, &false, &treasury, &0u32);
+    client.initialize(
+        &token_address,
+        &admin,
+        &members,
+        &10i128,
+        &200u32,
+        &false,
+        &treasury,
+        &0u32,
+    );
 
     token_client.mint(&member_a, &1000i128);
     client.deposit(&member_a, &1000i128);
@@ -102,7 +127,16 @@ fn test_proportional_yield_distribution() {
     members.push_back(member_b.clone());
     members.push_back(member_c.clone());
 
-    client.initialize(&token_address, &admin, &members, &10i128, &0u32, &true, &treasury, &0u32);
+    client.initialize(
+        &token_address,
+        &admin,
+        &members,
+        &10i128,
+        &0u32,
+        &true,
+        &treasury,
+        &0u32,
+    );
 
     token_client.mint(&member_a, &100i128);
     token_client.mint(&member_b, &200i128);
@@ -117,6 +151,64 @@ fn test_proportional_yield_distribution() {
     assert_eq!(client.balance_of(&member_b), 240);
     assert_eq!(client.balance_of(&member_c), 0);
     assert_eq!(client.total_balance(), 360);
+}
+
+#[test]
+fn test_add_member_can_deposit() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, token_address, admin, _treasury, _member_a, _member_b) = setup_pool(&env, false);
+    let token_client = token::StellarAssetClient::new(&env, &token_address);
+    let member_c = Address::generate(&env);
+
+    client.add_member(&admin, &member_c);
+    token_client.mint(&member_c, &100i128);
+    client.deposit(&member_c, &100i128);
+
+    assert_eq!(client.members().len(), 3);
+    assert_eq!(client.balance_of(&member_c), 100);
+}
+
+#[test]
+fn test_remove_member_refunds_balance() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, token_address, admin, _treasury, member_a, member_b) = setup_pool(&env, false);
+    let token_client = token::StellarAssetClient::new(&env, &token_address);
+    let token_iface = token::Client::new(&env, &token_address);
+    let member_c = Address::generate(&env);
+
+    client.add_member(&admin, &member_c);
+    token_client.mint(&member_b, &100i128);
+    client.deposit(&member_b, &100i128);
+
+    client.remove_member(&admin, &member_b);
+
+    assert_eq!(token_iface.balance(&member_b), 100);
+    assert_eq!(client.balance_of(&member_b), 0);
+    assert_eq!(client.total_balance(), 0);
+    assert_eq!(client.members().len(), 2);
+
+    token_client.mint(&member_a, &100i128);
+    client.deposit(&member_a, &100i128);
+}
+
+#[test]
+#[should_panic(expected = "not a member")]
+fn test_removed_member_cannot_deposit() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, token_address, admin, _treasury, _member_a, member_b) = setup_pool(&env, false);
+    let token_client = token::StellarAssetClient::new(&env, &token_address);
+    let member_c = Address::generate(&env);
+
+    client.add_member(&admin, &member_c);
+    client.remove_member(&admin, &member_b);
+    token_client.mint(&member_b, &100i128);
+    client.deposit(&member_b, &100i128);
 }
 
 // ── Upstream pause/emergency tests ────────────────────────────────────────────
@@ -267,7 +359,9 @@ mod mock_strategy {
     #[contractimpl]
     impl MockStrategy {
         pub fn deploy(_env: Env, _amount: i128) {}
-        pub fn harvest(_env: Env) -> i128 { 50 }
+        pub fn harvest(_env: Env) -> i128 {
+            50
+        }
     }
 }
 

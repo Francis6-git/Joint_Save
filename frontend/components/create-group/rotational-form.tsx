@@ -130,6 +130,7 @@ export function RotationalForm() {
       setStep("initializing")
       await initRotational(contractId, {
         token: TOKEN === "native" ? "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC" : TOKEN,
+        admin: address,
         members: validMembers,
         depositAmount: formData.contributionAmount,
         roundDuration: FREQUENCY_SECONDS[formData.frequency],

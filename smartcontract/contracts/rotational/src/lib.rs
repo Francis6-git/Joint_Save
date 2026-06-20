@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, token, Address, Env, IntoVal, Symbol, Vec, symbol_short,
+    contract, contractimpl, contracttype, symbol_short, token, Address, Env, IntoVal, Symbol, Vec,
 };
 
 // ── Storage keys ──────────────────────────────────────────────────────────────
@@ -90,10 +90,8 @@ impl RotationalPool {
         token_client.transfer(&member, &env.current_contract_address(), &deposit_amount);
 
         storage.set(&DataKey::HasDeposited(member.clone()), &true);
-        env.events().publish(
-            (symbol_short!("deposit"), member.clone()),
-            deposit_amount,
-        );
+        env.events()
+            .publish((symbol_short!("deposit"), member.clone()), deposit_amount);
 
         Self::report_deposit(&env, &member, deposit_amount);
     }
@@ -110,10 +108,7 @@ impl RotationalPool {
         assert!(!paused, "pool paused");
 
         let next_payout_time: u64 = storage.get(&DataKey::NextPayoutTime).unwrap();
-        assert!(
-            env.ledger().timestamp() >= next_payout_time,
-            "too early"
-        );
+        assert!(env.ledger().timestamp() >= next_payout_time, "too early");
 
         let members: Vec<Address> = storage.get(&DataKey::Members).unwrap();
         let deposit_amount: i128 = storage.get(&DataKey::DepositAmount).unwrap();
@@ -154,7 +149,11 @@ impl RotationalPool {
         if relayer_cut > 0 {
             token_client.transfer(&env.current_contract_address(), &relayer, &relayer_cut);
         }
-        token_client.transfer(&env.current_contract_address(), &beneficiary, &payout_amount);
+        token_client.transfer(
+            &env.current_contract_address(),
+            &beneficiary,
+            &payout_amount,
+        );
 
         env.events().publish(
             (symbol_short!("payout"), beneficiary.clone()),
@@ -183,6 +182,77 @@ impl RotationalPool {
                 &(env.ledger().timestamp() + round_duration),
             );
         }
+    }
+
+    pub fn add_member(env: Env, admin: Address, new_member: Address) {
+        admin.require_auth();
+
+        let storage = env.storage().persistent();
+        let stored_admin: Address = storage.get(&DataKey::Admin).unwrap();
+        assert!(admin == stored_admin, "not admin");
+
+        let current_round: u32 = storage.get(&DataKey::CurrentRound).unwrap_or(0);
+        assert!(current_round == 0, "round already started");
+
+        let mut members: Vec<Address> = storage.get(&DataKey::Members).unwrap();
+        assert!(!Self::is_member(&members, &new_member), "already a member");
+
+        for member in members.iter() {
+            let has_deposited: bool = storage
+                .get(&DataKey::HasDeposited(member.clone()))
+                .unwrap_or(false);
+            assert!(!has_deposited, "round already started");
+        }
+
+        members.push_back(new_member.clone());
+        storage.set(&DataKey::Members, &members);
+        env.events()
+            .publish((symbol_short!("add_mem"), new_member), ());
+    }
+
+    pub fn remove_member(env: Env, admin: Address, member: Address) {
+        admin.require_auth();
+
+        let storage = env.storage().persistent();
+        let stored_admin: Address = storage.get(&DataKey::Admin).unwrap();
+        assert!(admin == stored_admin, "not admin");
+
+        let has_deposited: bool = storage
+            .get(&DataKey::HasDeposited(member.clone()))
+            .unwrap_or(false);
+        assert!(!has_deposited, "member deposited this round");
+
+        let members: Vec<Address> = storage.get(&DataKey::Members).unwrap();
+        let removed_index = Self::member_index(&members, &member).expect("not a member");
+        assert!(members.len() > 1, "need >=1 members");
+
+        let mut updated_members: Vec<Address> = Vec::new(&env);
+        for existing in members.iter() {
+            if existing != member {
+                updated_members.push_back(existing);
+            }
+        }
+
+        let current_round: u32 = storage.get(&DataKey::CurrentRound).unwrap_or(0);
+        let mut pool_completed = false;
+        let updated_round = if removed_index < current_round {
+            current_round - 1
+        } else if removed_index == current_round && current_round >= updated_members.len() {
+            pool_completed = true;
+            0
+        } else {
+            current_round
+        };
+
+        storage.set(&DataKey::Members, &updated_members);
+        storage.set(&DataKey::CurrentRound, &updated_round);
+        if pool_completed {
+            storage.set(&DataKey::Active, &false);
+            env.events()
+                .publish((symbol_short!("complete"),), Symbol::new(&env, "pool_done"));
+        }
+        storage.remove(&DataKey::HasDeposited(member.clone()));
+        env.events().publish((symbol_short!("rem_mem"), member), ());
     }
 
     // ── Emergency controls ─────────────────────────────────────────────────
@@ -219,7 +289,11 @@ impl RotationalPool {
         let contract_balance = token_client.balance(&env.current_contract_address());
 
         if contract_balance > 0 {
-            token_client.transfer(&env.current_contract_address(), &recipient, &contract_balance);
+            token_client.transfer(
+                &env.current_contract_address(),
+                &recipient,
+                &contract_balance,
+            );
         }
 
         env.events()
@@ -298,6 +372,17 @@ impl RotationalPool {
             }
         }
         false
+    }
+
+    fn member_index(members: &Vec<Address>, who: &Address) -> Option<u32> {
+        let mut index = 0u32;
+        for m in members.iter() {
+            if m == *who {
+                return Some(index);
+            }
+            index += 1;
+        }
+        None
     }
 
     /// Best-effort report to the configured ReputationTracker. Reputation

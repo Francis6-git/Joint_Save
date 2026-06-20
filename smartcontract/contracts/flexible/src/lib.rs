@@ -1,8 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{
-    contract, contractimpl, contracttype, token, Address, Env, Vec, symbol_short,
-};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, Vec};
 
 #[contracttype]
 pub enum DataKey {
@@ -82,7 +80,8 @@ impl FlexiblePool {
         let total: i128 = storage.get(&DataKey::TotalBalance).unwrap();
         storage.set(&DataKey::TotalBalance, &(total + amount));
 
-        env.events().publish((symbol_short!("deposit"), member), amount);
+        env.events()
+            .publish((symbol_short!("deposit"), member), amount);
     }
 
     pub fn withdraw(env: Env, member: Address, amount: i128) {
@@ -114,7 +113,8 @@ impl FlexiblePool {
         }
         token_client.transfer(&env.current_contract_address(), &member, &net);
 
-        env.events().publish((symbol_short!("withdraw"), member), net);
+        env.events()
+            .publish((symbol_short!("withdraw"), member), net);
     }
 
     /// Distribute yield proportionally to all members with a balance.
@@ -142,7 +142,61 @@ impl FlexiblePool {
         }
 
         storage.set(&DataKey::TotalBalance, &(total + yield_amount));
-        env.events().publish((symbol_short!("yield"),), yield_amount);
+        env.events()
+            .publish((symbol_short!("yield"),), yield_amount);
+    }
+
+    pub fn add_member(env: Env, admin: Address, new_member: Address) {
+        admin.require_auth();
+
+        let storage = env.storage().persistent();
+        let stored_admin: Address = storage.get(&DataKey::Admin).unwrap();
+        assert!(admin == stored_admin, "not admin");
+
+        let mut members: Vec<Address> = storage.get(&DataKey::Members).unwrap();
+        assert!(!Self::is_member(&members, &new_member), "already a member");
+
+        members.push_back(new_member.clone());
+        storage.set(&DataKey::Members, &members);
+        env.events()
+            .publish((symbol_short!("add_mem"), new_member), ());
+    }
+
+    pub fn remove_member(env: Env, admin: Address, member: Address) {
+        admin.require_auth();
+
+        let storage = env.storage().persistent();
+        let stored_admin: Address = storage.get(&DataKey::Admin).unwrap();
+        assert!(admin == stored_admin, "not admin");
+
+        let members: Vec<Address> = storage.get(&DataKey::Members).unwrap();
+        assert!(Self::is_member(&members, &member), "not a member");
+        assert!(members.len() > 1, "need >=1 members");
+
+        let balance: i128 = storage.get(&DataKey::Balance(member.clone())).unwrap_or(0);
+        if balance > 0 {
+            let token_addr: Address = storage.get(&DataKey::Token).unwrap();
+            token::Client::new(&env, &token_addr).transfer(
+                &env.current_contract_address(),
+                &member,
+                &balance,
+            );
+
+            let total: i128 = storage.get(&DataKey::TotalBalance).unwrap();
+            storage.set(&DataKey::TotalBalance, &(total - balance));
+            storage.set(&DataKey::Balance(member.clone()), &0i128);
+        }
+
+        let mut updated_members: Vec<Address> = Vec::new(&env);
+        for existing in members.iter() {
+            if existing != member {
+                updated_members.push_back(existing);
+            }
+        }
+
+        storage.set(&DataKey::Members, &updated_members);
+        env.events()
+            .publish((symbol_short!("rem_mem"), member), balance);
     }
 
     // ── Emergency controls ────────────────────────────────────────────────
@@ -179,11 +233,16 @@ impl FlexiblePool {
         let contract_balance = token_client.balance(&env.current_contract_address());
 
         if contract_balance > 0 {
-            token_client.transfer(&env.current_contract_address(), &recipient, &contract_balance);
+            token_client.transfer(
+                &env.current_contract_address(),
+                &recipient,
+                &contract_balance,
+            );
         }
 
         storage.set(&DataKey::TotalBalance, &0i128);
-        env.events().publish((symbol_short!("emrg_wd"),), contract_balance);
+        env.events()
+            .publish((symbol_short!("emrg_wd"),), contract_balance);
     }
 
     // ── Yield strategy ────────────────────────────────────────────────────
@@ -197,7 +256,8 @@ impl FlexiblePool {
         let yield_enabled: bool = storage.get(&DataKey::YieldEnabled).unwrap_or(false);
         assert!(yield_enabled, "yield disabled");
         storage.set(&DataKey::YieldStrategy, &strategy);
-        env.events().publish((symbol_short!("set_strat"),), strategy);
+        env.events()
+            .publish((symbol_short!("set_strat"),), strategy);
     }
 
     /// Deploy `amount` of pool funds to the yield strategy contract.
@@ -209,7 +269,9 @@ impl FlexiblePool {
         let stored_admin: Address = storage.get(&DataKey::Admin).unwrap();
         assert!(admin == stored_admin, "not admin");
 
-        let strategy: Address = storage.get(&DataKey::YieldStrategy).expect("no strategy set");
+        let strategy: Address = storage
+            .get(&DataKey::YieldStrategy)
+            .expect("no strategy set");
 
         let total: i128 = storage.get(&DataKey::TotalBalance).unwrap();
         assert!(total >= amount, "insufficient pool balance");
@@ -241,7 +303,9 @@ impl FlexiblePool {
         let stored_admin: Address = storage.get(&DataKey::Admin).unwrap();
         assert!(admin == stored_admin, "not admin");
 
-        let strategy: Address = storage.get(&DataKey::YieldStrategy).expect("no strategy set");
+        let strategy: Address = storage
+            .get(&DataKey::YieldStrategy)
+            .expect("no strategy set");
 
         let yield_amount: i128 = env.invoke_contract(
             &strategy,
@@ -260,30 +324,46 @@ impl FlexiblePool {
                 }
             }
             storage.set(&DataKey::TotalBalance, &(total + yield_amount));
-            env.events().publish((symbol_short!("harvested"),), yield_amount);
+            env.events()
+                .publish((symbol_short!("harvested"),), yield_amount);
         }
     }
 
     // ── Views ─────────────────────────────────────────────────────────────
 
     pub fn balance_of(env: Env, member: Address) -> i128 {
-        env.storage().persistent().get(&DataKey::Balance(member)).unwrap_or(0)
+        env.storage()
+            .persistent()
+            .get(&DataKey::Balance(member))
+            .unwrap_or(0)
     }
 
     pub fn total_balance(env: Env) -> i128 {
-        env.storage().persistent().get(&DataKey::TotalBalance).unwrap_or(0)
+        env.storage()
+            .persistent()
+            .get(&DataKey::TotalBalance)
+            .unwrap_or(0)
     }
 
     pub fn members(env: Env) -> Vec<Address> {
-        env.storage().persistent().get(&DataKey::Members).unwrap_or(Vec::new(&env))
+        env.storage()
+            .persistent()
+            .get(&DataKey::Members)
+            .unwrap_or(Vec::new(&env))
     }
 
     pub fn is_active(env: Env) -> bool {
-        env.storage().persistent().get(&DataKey::Active).unwrap_or(false)
+        env.storage()
+            .persistent()
+            .get(&DataKey::Active)
+            .unwrap_or(false)
     }
 
     pub fn is_paused(env: Env) -> bool {
-        env.storage().persistent().get(&DataKey::Paused).unwrap_or(false)
+        env.storage()
+            .persistent()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
     }
 
     pub fn admin(env: Env) -> Address {
@@ -295,14 +375,19 @@ impl FlexiblePool {
     }
 
     pub fn deployed_to_yield(env: Env) -> i128 {
-        env.storage().persistent().get(&DataKey::DeployedToYield).unwrap_or(0)
+        env.storage()
+            .persistent()
+            .get(&DataKey::DeployedToYield)
+            .unwrap_or(0)
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
 
     fn is_member(members: &Vec<Address>, who: &Address) -> bool {
         for m in members.iter() {
-            if m == *who { return true; }
+            if m == *who {
+                return true;
+            }
         }
         false
     }

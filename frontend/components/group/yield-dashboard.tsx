@@ -7,13 +7,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Loader2, TrendingUp, Zap, AlertTriangle, RefreshCw } from "lucide-react"
-import { useStellar } from "@/components/web3-provider"
+import { useStellar, STELLAR_RPC_URL, STELLAR_NETWORK_PASSPHRASE } from "@/components/web3-provider"
 import {
   Contract, TransactionBuilder, BASE_FEE, nativeToScVal, xdr,
-  Address,
+  Address, rpc,
 } from "@stellar/stellar-sdk"
-import { getRpc, STELLAR_RPC_URL } from "@/hooks/useJointSaveContracts"
-import { STELLAR_NETWORK_PASSPHRASE } from "@/components/web3-provider"
+import { getRpc } from "@/hooks/useJointSaveContracts"
 
 const TX_TIMEOUT = 300
 
@@ -88,7 +87,7 @@ export function YieldDashboard({ poolAddress }: YieldDashboardProps) {
           // scvOption wrapping an address
           const inner = stratVal.switch().name === "scvAddress"
             ? stratVal
-            : stratVal.value() as xdr.ScVal
+            : stratVal.value() as unknown as xdr.ScVal
           strategyAddress = Address.fromScVal(inner).toString()
         }
       } catch {}

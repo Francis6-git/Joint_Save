@@ -15,6 +15,8 @@ import {
   ShieldOff,
   ShieldCheck,
   Clock,
+  UserPlus,
+  Trash2,
 } from "lucide-react";
 import { useStellar } from "@/components/web3-provider";
 import {
@@ -27,9 +29,13 @@ import {
   useFlexibleWithdraw,
   usePausePool,
   useUnpausePool,
+  useAddPoolMember,
+  useRemovePoolMember,
   stroopsToXlm,
   fetchRotationalState,
+  fetchPoolMembers,
 } from "@/hooks/useJointSaveContracts";
+import { validateStellarAddress } from "@/lib/form-validation";
 import {
   Tooltip,
   TooltipContent,
@@ -62,6 +68,7 @@ async function logActivity(
   userAddress: string,
   amount: string | null,
   txHash: string,
+  memberAddress?: string,
 ) {
   try {
     await fetch("/api/pools", {
@@ -75,6 +82,7 @@ async function logActivity(
           amount: amount ? parseFloat(amount) : null,
           tx_hash: txHash,
         },
+        memberAddress: memberAddress || null,
       }),
     });
   } catch {}
@@ -100,6 +108,10 @@ export function GroupActions({
 
   // Pool metadata from Supabase
   const [poolData, setPoolData] = useState<any>(null);
+  const [members, setMembers] = useState<string[]>([]);
+  const [newMember, setNewMember] = useState("");
+  const [memberToRemove, setMemberToRemove] = useState<string | null>(null);
+  const isPending = !poolAddress || poolAddress === "pending_deployment";
   
   // Modal Preview states
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -120,6 +132,16 @@ export function GroupActions({
       .catch((err) => console.error("Failed to load pool details:", err));
   }, [groupId]);
 
+  const refreshMembers = async () => {
+    if (isPending || !isAdmin || !poolAddress) return;
+    const onchainMembers = await fetchPoolMembers(poolAddress);
+    setMembers(onchainMembers);
+  };
+
+  useEffect(() => {
+    refreshMembers();
+  }, [isAdmin, isPending, poolAddress]);
+
   const rotationalDeposit = useRotationalDeposit(poolAddress);
   const triggerPayout = useTriggerPayout(poolAddress);
   const targetContribute = useTargetContribute(poolAddress, depositAmount);
@@ -129,11 +151,11 @@ export function GroupActions({
   const flexibleWithdraw = useFlexibleWithdraw(poolAddress, withdrawAmount);
   const pausePool = usePausePool(poolAddress);
   const unpausePool = useUnpausePool(poolAddress);
+  const addPoolMember = useAddPoolMember(poolAddress);
+  const removePoolMember = useRemovePoolMember(poolAddress);
 
   const { optimisticState, registerOptimistic, updateTxHash, markFailed } =
     useOptimisticTransactions(poolAddress);
-
-  const isPending = !poolAddress || poolAddress === "pending_deployment";
 
   // Watch for confirmation/failure from optimistic state
   useEffect(() => {
@@ -380,6 +402,50 @@ export function GroupActions({
     }
   };
 
+  const handleAddMember = async () => {
+    setError("");
+    setSuccessMsg("");
+    if (!address) return setError("Please connect your wallet first");
+    if (!isAdmin) return setError("Only the pool admin can manage members.");
+    if (isPending) return setError("Contract not yet deployed.");
+
+    const validation = validateStellarAddress(newMember.trim().toUpperCase());
+    if (!validation.valid) return setError(validation.message);
+
+    try {
+      const txHash = await addPoolMember.addMember(newMember.trim().toUpperCase());
+      if (txHash) {
+        await logActivity(groupId, "member_added", address, null, txHash, newMember.trim().toUpperCase());
+        setSuccessMsg("Member added successfully.");
+        setNewMember("");
+        await refreshMembers();
+      }
+    } catch (e: any) {
+      setError(e.message || "Transaction failed");
+    }
+  };
+
+  const handleRemoveMember = async () => {
+    setError("");
+    setSuccessMsg("");
+    if (!address) return setError("Please connect your wallet first");
+    if (!isAdmin) return setError("Only the pool admin can manage members.");
+    if (isPending) return setError("Contract not yet deployed.");
+    if (!memberToRemove) return;
+
+    try {
+      const txHash = await removePoolMember.removeMember(memberToRemove);
+      if (txHash) {
+        await logActivity(groupId, "member_removed", address, null, txHash, memberToRemove);
+        setSuccessMsg("Member removed successfully.");
+        setMemberToRemove(null);
+        await refreshMembers();
+      }
+    } catch (e: any) {
+      setError(e.message || "Transaction failed");
+    }
+  };
+
   const isDepositLoading =
     optimisticState.pendingTx?.type === "deposit" &&
     optimisticState.pendingTx.status === "pending"
@@ -402,6 +468,8 @@ export function GroupActions({
   const isTarget = poolType === "target";
   const isFlexible = poolType === "flexible";
   const actionsDisabled = isPaused || isPending || !address;
+  const formatAddress = (addr: string) =>
+    addr.length > 18 ? `${addr.slice(0, 8)}...${addr.slice(-8)}` : addr;
 
   // Helper to render pending badge
   const renderPendingBadge = () => {
@@ -712,6 +780,67 @@ export function GroupActions({
             </div>
           )}
 
+          {isAdmin && !isPending && (
+            <div className="border-t border-border pt-6 space-y-4">
+              <p className="text-xs text-muted-foreground font-medium">
+                Manage Members
+              </p>
+              <div className="space-y-2">
+                <Label htmlFor="new-member">Add Stellar Address</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="new-member"
+                    value={newMember}
+                    onChange={(event) => setNewMember(event.target.value)}
+                    placeholder="G..."
+                    disabled={addPoolMember.isLoading || removePoolMember.isLoading}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleAddMember}
+                    disabled={
+                      addPoolMember.isLoading ||
+                      removePoolMember.isLoading ||
+                      !newMember.trim()
+                    }
+                    aria-label="Add member"
+                  >
+                    {addPoolMember.isLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <UserPlus className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {members.map((member) => (
+                  <div
+                    key={member}
+                    className="flex items-center justify-between gap-2 rounded-md border border-border p-2"
+                  >
+                    <span className="text-xs font-mono break-all">
+                      {formatAddress(member)}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-destructive hover:text-destructive"
+                      onClick={() => setMemberToRemove(member)}
+                      disabled={removePoolMember.isLoading || addPoolMember.isLoading}
+                      aria-label={`Remove ${member}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="border-t border-border pt-6">
             <p className="text-xs text-muted-foreground mb-2">
               Your Stellar address
@@ -805,6 +934,45 @@ export function GroupActions({
                 </>
               ) : (
                 "Confirm & Sign"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!memberToRemove}
+        onOpenChange={(open) => {
+          if (!open) setMemberToRemove(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-[425px] bg-background border border-border">
+          <DialogHeader>
+            <DialogTitle>Remove Member</DialogTitle>
+            <DialogDescription>
+              This will remove {memberToRemove || "this address"} from the pool. Their balance will be refunded.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setMemberToRemove(null)}
+              disabled={removePoolMember.isLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleRemoveMember}
+              disabled={removePoolMember.isLoading}
+            >
+              {removePoolMember.isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Removing...
+                </>
+              ) : (
+                "Remove"
               )}
             </Button>
           </DialogFooter>
