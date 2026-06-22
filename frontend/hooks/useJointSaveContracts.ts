@@ -97,6 +97,9 @@ function makeE2EServer(): rpc.Server {
       returnValue: addressVal(E2E_CONTRACT_ID),
     }),
     getLatestLedger: async () => ({ sequence: 1_000_000 }),
+    // TTL/storage reads (e.g. fetchPoolTtl) — return no entries so callers
+    // resolve gracefully instead of throwing on a missing method.
+    getLedgerEntries: async () => ({ entries: [], latestLedger: 1_000_000 }),
   } as unknown as rpc.Server
 }
 
