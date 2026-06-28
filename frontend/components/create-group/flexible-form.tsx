@@ -19,6 +19,7 @@ import {
   validateStellarAddress,
   validatePositiveAmount,
   validateWithdrawalFee,
+  findDuplicateAddresses,
 } from "@/lib/form-validation"
 
 function isValidStellarAddress(addr: string) {
@@ -35,7 +36,6 @@ export function FlexibleForm() {
   const { address } = useStellar()
   const [token, setToken] = useState<SelectedToken>({ address: "native", symbol: "XLM", decimals: 7 })
   const [members, setMembers] = useState<string[]>([""])
-  const [memberErrors, setMemberErrors] = useState<string[]>([""])
   const [error, setError] = useState("")
   const [step, setStep] = useState<"idle" | "deploying" | "initializing" | "registering" | "saving">("idle")
   const [formData, setFormData] = useState({
@@ -55,6 +55,14 @@ export function FlexibleForm() {
 
   const allMembers = address ? [address, ...members] : members
   const validMembers = Array.from(new Set(allMembers.filter(isValidStellarAddress)))
+  const duplicateIndices = findDuplicateAddresses(allMembers)
+  const memberErrors = members.map((m, i) => {
+    if (!m) return ""
+    const format = validateStellarAddress(m)
+    if (!format.valid) return format.message
+    const allMembersIndex = address ? i + 1 : i
+    return duplicateIndices.has(allMembersIndex) ? "Duplicate address — already in this pool's member list" : ""
+  })
   const isCreating = step !== "idle"
 
   const validateField = useCallback((name: keyof FieldErrors, value: string) => {
@@ -72,15 +80,11 @@ export function FlexibleForm() {
 
   const updateMember = (i: number, v: string) => {
     const n = [...members]; n[i] = v; setMembers(n)
-    const errs = [...memberErrors]
-    errs[i] = v ? (validateStellarAddress(v).valid ? "" : validateStellarAddress(v).message) : ""
-    setMemberErrors(errs)
   }
 
-  const addMember = () => { setMembers([...members, ""]); setMemberErrors([...memberErrors, ""]) }
+  const addMember = () => { setMembers([...members, ""]) }
   const removeMember = (i: number) => {
     setMembers(members.filter((_, idx) => idx !== i))
-    setMemberErrors(memberErrors.filter((_, idx) => idx !== i))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -98,6 +102,7 @@ export function FlexibleForm() {
     })
 
     if (!address) return setError("Please connect your wallet first")
+    if (duplicateIndices.size > 0) return setError("Duplicate member addresses found — please remove duplicates before continuing")
     if (validMembers.length < 2) return setError("Need at least 2 valid Stellar addresses (you + 1 other)")
     if (!nameResult.valid || !depositResult.valid || !feeResult.valid) return
 

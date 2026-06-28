@@ -19,6 +19,7 @@ import {
   validateGroupName,
   validateStellarAddress,
   validatePositiveAmount,
+  findDuplicateAddresses,
 } from "@/lib/form-validation"
 import type { DuplicatePrefill } from "@/app/dashboard/create/[type]/page"
 
@@ -48,9 +49,6 @@ export function RotationalForm({ prefill }: { prefill?: DuplicatePrefill }) {
   const [members, setMembers] = useState<string[]>(
     initialMembers.length > 0 ? initialMembers : [""]
   )
-  const [memberErrors, setMemberErrors] = useState<string[]>(
-    initialMembers.length > 0 ? initialMembers.map(() => "") : [""]
-  )
   const [error, setError] = useState("")
   const [step, setStep] = useState<"idle" | "deploying" | "initializing" | "registering" | "saving">("idle")
   const [formData, setFormData] = useState({
@@ -75,6 +73,14 @@ export function RotationalForm({ prefill }: { prefill?: DuplicatePrefill }) {
   // Always include creator as first member
   const allMembers = address ? [address, ...members] : members
   const validMembers = Array.from(new Set(allMembers.filter(isValidStellarAddress)))
+  const duplicateIndices = findDuplicateAddresses(allMembers)
+  const memberErrors = members.map((m, i) => {
+    if (!m) return ""
+    const format = validateStellarAddress(m)
+    if (!format.valid) return format.message
+    const allMembersIndex = address ? i + 1 : i
+    return duplicateIndices.has(allMembersIndex) ? "Duplicate address — already in this pool's member list" : ""
+  })
   const isCreating = step !== "idle"
 
   const validateField = useCallback((name: keyof FieldErrors, value: string) => {
@@ -92,24 +98,14 @@ export function RotationalForm({ prefill }: { prefill?: DuplicatePrefill }) {
     const next = [...members]
     next[i] = v
     setMembers(next)
-    const errs = [...memberErrors]
-    if (v) {
-      const r = validateStellarAddress(v)
-      errs[i] = r.valid ? "" : r.message
-    } else {
-      errs[i] = ""
-    }
-    setMemberErrors(errs)
   }
 
   const addMember = () => {
     setMembers([...members, ""])
-    setMemberErrors([...memberErrors, ""])
   }
 
   const removeMember = (i: number) => {
     setMembers(members.filter((_, idx) => idx !== i))
-    setMemberErrors(memberErrors.filter((_, idx) => idx !== i))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -126,6 +122,7 @@ export function RotationalForm({ prefill }: { prefill?: DuplicatePrefill }) {
     })
 
     if (!address) return setError("Please connect your wallet first")
+    if (duplicateIndices.size > 0) return setError("Duplicate member addresses found — please remove duplicates before continuing")
     if (validMembers.length < 2) return setError("Need at least 2 valid Stellar addresses (you + 1 other)")
     if (!nameResult.valid || !amountResult.valid) return
 
