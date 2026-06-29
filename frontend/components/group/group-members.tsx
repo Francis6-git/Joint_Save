@@ -30,13 +30,6 @@ interface Member {
   joined_at: string;
 }
 
-// TEMP DEMO — screenshots only; remove before committing.
-const DEMO_MEMBERS: Member[] = [
-  { id: "1", member_address: "0xAAaaAA1111", contribution_amount: 50, status: "paid", joined_at: "" },
-  { id: "2", member_address: "0xBBbbBB2222", contribution_amount: 50, status: "pending", joined_at: "" },
-  { id: "3", member_address: "0xCCccCC3333", contribution_amount: 50, status: "pending", joined_at: "" },
-  { id: "4", member_address: "0xDDddDD4444", contribution_amount: 50, status: "late", joined_at: "" },
-];
 
 interface GroupMembersProps {
   groupId: string;
@@ -68,7 +61,7 @@ export function GroupMembers({
   const { optimisticState } = useOptimisticTransactions(cacheKey);
   const { toast } = useToast();
 
-  const members: Member[] = DEMO_MEMBERS; // TEMP DEMO — revert to: data?.db?.pool_members ?? [];
+  const members: Member[] = data?.db?.pool_members ?? [];
   const onchainState = data?.onchain;
 
   const [reputations, setReputations] = useState<Record<string, ReputationScore>>({});
